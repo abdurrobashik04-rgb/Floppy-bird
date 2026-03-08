@@ -1,436 +1,151 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+<!DOCTYPE html>
 
-const GRAVITY = 0.5;
-const JUMP_FORCE = -9;
-const PIPE_WIDTH = 60;
-const PIPE_GAP = 160;
-const PIPE_SPEED = 3;
-const BIRD_X = 80;
-const BIRD_SIZE = 30;
-
-export default function FlappyBird() {
-  const [gameState, setGameState] = useState("idle"); // idle, playing, dead
-  const [birdY, setBirdY] = useState(250);
-  const [birdVel, setBirdVel] = useState(0);
-  const [pipes, setPipes] = useState([]);
-  const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
-  const [birdRot, setBirdRot] = useState(0);
-  const [frame, setFrame] = useState(0);
-
-  const gameRef = useRef(null);
-  const stateRef = useRef(gameState);
-  const birdYRef = useRef(birdY);
-  const birdVelRef = useRef(birdVel);
-  const pipesRef = useRef(pipes);
-  const scoreRef = useRef(score);
-  const animRef = useRef(null);
-  const lastTimeRef = useRef(null);
-
-  const CANVAS_W = 400;
-  const CANVAS_H = 550;
-  const GROUND_H = 60;
-
-  stateRef.current = gameState;
-  birdYRef.current = birdY;
-  birdVelRef.current = birdVel;
-  pipesRef.current = pipes;
-  scoreRef.current = score;
-
-  const generatePipe = (x) => ({
-    x,
-    topH: Math.random() * (CANVAS_H - GROUND_H - PIPE_GAP - 80) + 40,
-    passed: false,
-    id: Math.random(),
-  });
-
-  const resetGame = useCallback(() => {
-    setBirdY(250);
-    setBirdVel(0);
-    setBirdRot(0);
-    setPipes([generatePipe(500), generatePipe(720), generatePipe(940)]);
-    setScore(0);
-    setFrame(0);
-    lastTimeRef.current = null;
-  }, []);
-
-  const jump = useCallback(() => {
-    if (stateRef.current === "idle") {
-      resetGame();
-      setGameState("playing");
-      setBirdVel(JUMP_FORCE);
-    } else if (stateRef.current === "playing") {
-      setBirdVel(JUMP_FORCE);
-    } else if (stateRef.current === "dead") {
-      setGameState("idle");
-    }
-  }, [resetGame]);
-
-  useEffect(() => {
-    const handleKey = (e) => {
-      if (e.code === "Space" || e.code === "ArrowUp") {
-        e.preventDefault();
-        jump();
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [jump]);
-
-  useEffect(() => {
-    if (gameState !== "playing") {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-      return;
-    }
-
-    const tick = (timestamp) => {
-      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-      const delta = Math.min((timestamp - lastTimeRef.current) / 16.67, 3);
-      lastTimeRef.current = timestamp;
-
-      setFrame((f) => f + 1);
-
-      setBirdVel((v) => {
-        const newVel = v + GRAVITY * delta;
-        const clamped = Math.max(Math.min(newVel, 12), -12);
-        setBirdRot(Math.min(Math.max(clamped * 5, -25), 70));
-        return clamped;
-      });
-
-      setBirdY((y) => {
-        const newY = y + birdVelRef.current * delta;
-        if (newY >= CANVAS_H - GROUND_H - BIRD_SIZE || newY <= 0) {
-          setHighScore((h) => Math.max(h, scoreRef.current));
-          setGameState("dead");
-          return y;
-        }
-        return newY;
-      });
-
-      setPipes((prev) => {
-        const updated = prev
-          .map((p) => ({ ...p, x: p.x - PIPE_SPEED * delta }))
-          .filter((p) => p.x > -PIPE_WIDTH - 10);
-
-        while (
-          updated.length < 3 ||
-          updated[updated.length - 1].x < CANVAS_W + 200
-        ) {
-          const lastX =
-            updated.length > 0
-              ? updated[updated.length - 1].x
-              : CANVAS_W + 50;
-          updated.push(generatePipe(lastX + 220));
-        }
-
-        let collision = false;
-        updated.forEach((p) => {
-          const bx = BIRD_X;
-          const by = birdYRef.current;
-          const margin = 4;
-
-          if (
-            bx + BIRD_SIZE - margin > p.x &&
-            bx + margin < p.x + PIPE_WIDTH
-          ) {
-            if (by + margin < p.topH || by + BIRD_SIZE - margin > p.topH + PIPE_GAP) {
-              collision = true;
-            }
-          }
-
-          if (!p.passed && p.x + PIPE_WIDTH < BIRD_X) {
-            p.passed = true;
-            setScore((s) => s + 1);
-          }
-        });
-
-        if (collision) {
-          setHighScore((h) => Math.max(h, scoreRef.current));
-          setGameState("dead");
-        }
-
-        return updated;
-      });
-
-      animRef.current = requestAnimationFrame(tick);
-    };
-
-    animRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animRef.current);
-  }, [gameState]);
-
-  const clouds = useRef([
-    { x: 80, y: 60, w: 70, speed: 0.3 },
-    { x: 250, y: 40, w: 50, speed: 0.2 },
-    { x: 320, y: 80, w: 60, speed: 0.25 },
-  ]);
-
-  useEffect(() => {
-    if (gameState === "playing") {
-      clouds.current = clouds.current.map((c) => {
-        let nx = c.x - c.speed;
-        if (nx < -100) nx = CANVAS_W + 50;
-        return { ...c, x: nx };
-      });
-    }
-  }, [frame, gameState]);
-
-  const wingUp = frame % 8 < 4;
-
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily: "'Segoe UI', sans-serif",
-        userSelect: "none",
-      }}
-    >
-      <div style={{ marginBottom: 16, textAlign: "center" }}>
-        <h1 style={{
-          color: "#ffd700",
-          fontSize: 32,
-          fontWeight: 900,
-          letterSpacing: 3,
-          textShadow: "0 0 20px #ffd70088",
-          margin: 0,
-        }}>
-          🐦 FLOPPY BIRD
-        </h1>
-        <div style={{ color: "#aac4ff", fontSize: 13, marginTop: 4, letterSpacing: 1 }}>
-          SPACE / TAP to fly
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
-        <div style={{
-          background: "rgba(255,255,255,0.07)",
-          borderRadius: 12,
-          padding: "6px 20px",
-          color: "#fff",
-          fontSize: 18,
-          fontWeight: 700,
-          border: "1px solid rgba(255,255,255,0.15)",
-        }}>
-          🏆 {highScore}
-        </div>
-        <div style={{
-          background: "rgba(255,215,0,0.15)",
-          borderRadius: 12,
-          padding: "6px 20px",
-          color: "#ffd700",
-          fontSize: 18,
-          fontWeight: 700,
-          border: "1px solid rgba(255,215,0,0.3)",
-        }}>
-          ⭐ {score}
-        </div>
-      </div>
-
-      <div
-        ref={gameRef}
-        onClick={jump}
-        style={{
-          width: CANVAS_W,
-          height: CANVAS_H,
-          position: "relative",
-          overflow: "hidden",
-          borderRadius: 20,
-          cursor: "pointer",
-          boxShadow: "0 0 60px rgba(100,180,255,0.2), 0 20px 60px rgba(0,0,0,0.5)",
-          border: "2px solid rgba(255,255,255,0.1)",
-          background: "linear-gradient(180deg, #87CEEB 0%, #b0e0ff 60%, #c8f0c0 80%, #90EE90 100%)",
-        }}
-      >
-        {/* Sky gradient overlay */}
-        <div style={{
-          position: "absolute", inset: 0,
-          background: "linear-gradient(180deg, #5ba3d9 0%, #87CEEB 30%, #b8dff5 70%, transparent 100%)",
-          pointerEvents: "none",
-        }} />
-
-        {/* Clouds */}
-        {clouds.current.map((c, i) => (
-          <div key={i} style={{
-            position: "absolute",
-            left: c.x, top: c.y,
-            width: c.w, height: c.w * 0.55,
-            background: "rgba(255,255,255,0.85)",
-            borderRadius: "50%",
-            boxShadow: `${c.w * 0.3}px -${c.w * 0.2}px 0 ${c.w * 0.2}px rgba(255,255,255,0.7),
-                        -${c.w * 0.2}px -${c.w * 0.15}px 0 ${c.w * 0.15}px rgba(255,255,255,0.7)`,
-          }} />
-        ))}
-
-        {/* Pipes */}
-        {pipes.map((p) => (
-          <g key={p.id}>
-            {/* Top pipe */}
-            <div style={{
-              position: "absolute",
-              left: p.x, top: 0,
-              width: PIPE_WIDTH, height: p.topH,
-              background: "linear-gradient(90deg, #3a7d44, #52b056, #3a7d44)",
-              borderRadius: "0 0 6px 6px",
-              boxShadow: "inset -4px 0 8px rgba(0,0,0,0.3), 2px 0 8px rgba(0,0,0,0.2)",
-            }}>
-              <div style={{
-                position: "absolute", bottom: -14, left: -6,
-                width: PIPE_WIDTH + 12, height: 20,
-                background: "linear-gradient(90deg, #2d6e36, #4a9e4e, #2d6e36)",
-                borderRadius: 4,
-                boxShadow: "0 3px 8px rgba(0,0,0,0.3)",
-              }} />
-            </div>
-            {/* Bottom pipe */}
-            <div style={{
-              position: "absolute",
-              left: p.x, top: p.topH + PIPE_GAP,
-              width: PIPE_WIDTH,
-              height: CANVAS_H - p.topH - PIPE_GAP - GROUND_H,
-              background: "linear-gradient(90deg, #3a7d44, #52b056, #3a7d44)",
-              borderRadius: "6px 6px 0 0",
-              boxShadow: "inset -4px 0 8px rgba(0,0,0,0.3), 2px 0 8px rgba(0,0,0,0.2)",
-            }}>
-              <div style={{
-                position: "absolute", top: -14, left: -6,
-                width: PIPE_WIDTH + 12, height: 20,
-                background: "linear-gradient(90deg, #2d6e36, #4a9e4e, #2d6e36)",
-                borderRadius: 4,
-                boxShadow: "0 -3px 8px rgba(0,0,0,0.3)",
-              }} />
-            </div>
-          </g>
-        ))}
-
-        {/* Ground */}
-        <div style={{
-          position: "absolute",
-          bottom: 0, left: 0, right: 0,
-          height: GROUND_H,
-          background: "linear-gradient(180deg, #8BC34A 0%, #689F38 40%, #795548 40%, #5D4037 100%)",
-          borderTop: "3px solid #6abf33",
-        }}>
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} style={{
-              position: "absolute",
-              left: `${i * 11 + (frame * 0.5 % 11)}%`,
-              top: 0, width: 8, height: 20,
-              background: "rgba(255,255,255,0.15)",
-              borderRadius: 2,
-            }} />
-          ))}
-        </div>
-
-        {/* Bird */}
-        <div style={{
-          position: "absolute",
-          left: BIRD_X,
-          top: birdY,
-          width: BIRD_SIZE,
-          height: BIRD_SIZE,
-          transform: `rotate(${birdRot}deg)`,
-          transition: "transform 0.05s",
-          fontSize: 28,
-          lineHeight: 1,
-          filter: "drop-shadow(2px 3px 4px rgba(0,0,0,0.3))",
-        }}>
-          {wingUp ? "🐦" : "🦅"}
-        </div>
-
-        {/* Idle Screen */}
-        {gameState === "idle" && (
-          <div style={{
-            position: "absolute", inset: 0,
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            background: "rgba(0,0,0,0.35)",
-            backdropFilter: "blur(2px)",
-          }}>
-            <div style={{
-              background: "rgba(255,255,255,0.95)",
-              borderRadius: 20,
-              padding: "28px 40px",
-              textAlign: "center",
-              boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-            }}>
-              <div style={{ fontSize: 48 }}>🐦</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "#1a1a2e", marginTop: 8 }}>
-                FLOPPY BIRD
-              </div>
-              <div style={{ fontSize: 13, color: "#666", margin: "8px 0 16px" }}>
-                পাইপের ফাঁক দিয়ে উড়ে যাও!
-              </div>
-              <div style={{
-                background: "#ffd700",
-                color: "#1a1a2e",
-                padding: "10px 28px",
-                borderRadius: 30,
-                fontWeight: 800,
-                fontSize: 15,
-                boxShadow: "0 4px 15px rgba(255,215,0,0.4)",
-              }}>
-                SPACE / TAP করো শুরু করতে
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Dead Screen */}
-        {gameState === "dead" && (
-          <div style={{
-            position: "absolute", inset: 0,
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            background: "rgba(0,0,0,0.5)",
-            backdropFilter: "blur(3px)",
-          }}>
-            <div style={{
-              background: "rgba(255,255,255,0.95)",
-              borderRadius: 20,
-              padding: "28px 40px",
-              textAlign: "center",
-              boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-              animation: "popIn 0.3s ease",
-            }}>
-              <div style={{ fontSize: 44 }}>💥</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "#e53935", marginTop: 6 }}>
-                GAME OVER!
-              </div>
-              <div style={{ fontSize: 32, fontWeight: 900, color: "#1a1a2e", margin: "8px 0" }}>
-                {score} <span style={{ fontSize: 16, color: "#888" }}>পয়েন্ট</span>
-              </div>
-              {score >= highScore && score > 0 && (
-                <div style={{ color: "#ffa000", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
-                  🏆 নতুন রেকর্ড!
-                </div>
-              )}
-              <div style={{ fontSize: 13, color: "#888", marginBottom: 16 }}>
-                সর্বোচ্চ: {highScore} পয়েন্ট
-              </div>
-              <div style={{
-                background: "#4CAF50",
-                color: "white",
-                padding: "10px 28px",
-                borderRadius: 30,
-                fontWeight: 800,
-                fontSize: 15,
-                boxShadow: "0 4px 15px rgba(76,175,80,0.4)",
-              }}>
-                TAP করো আবার খেলতে
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 14, letterSpacing: 1 }}>
-        SPACE · ARROW UP · CLICK/TAP
-      </div>
-    </div>
-  );
+<html lang="bn">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#ffd700"/>
+<title>Floppy Bird 🐦</title>
+<link rel="manifest" href="manifest.json"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Segoe UI',sans-serif;overflow:hidden;touch-action:none}
+h1{color:#ffd700;font-size:26px;font-weight:900;letter-spacing:3px;text-shadow:0 0 20px #ffd70088;margin-bottom:4px;text-align:center}
+.sub{color:#aac4ff;font-size:12px;letter-spacing:1px;margin-bottom:10px;text-align:center}
+.scores{display:flex;gap:14px;margin-bottom:10px}
+.sbox{background:rgba(255,255,255,.07);border-radius:12px;padding:5px 16px;color:#fff;font-size:16px;font-weight:700;border:1px solid rgba(255,255,255,.15)}
+.sbox.cur{background:rgba(255,215,0,.15);color:#ffd700;border-color:rgba(255,215,0,.3)}
+canvas{border-radius:18px;box-shadow:0 0 60px rgba(100,180,255,.2),0 20px 60px rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.1);display:block;cursor:pointer}
+.hint{color:rgba(255,255,255,.3);font-size:11px;margin-top:10px;letter-spacing:1px;text-align:center}
+</style>
+</head>
+<body>
+<h1>🐦 FLOPPY BIRD</h1>
+<div class="sub">পাইপের ফাঁক দিয়ে উড়ে যাও!</div>
+<div class="scores">
+  <div class="sbox">🏆 <span id="hi">0</span></div>
+  <div class="sbox cur">⭐ <span id="sc">0</span></div>
+</div>
+<canvas id="c"></canvas>
+<div class="hint">SPACE · TAP to fly</div>
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const hiEl=document.getElementById('hi');
+const scEl=document.getElementById('sc');
+const BASE_W=380,BASE_H=540;
+let scale=1,CW,CH;
+function resize(){
+  const s=Math.min((window.innerWidth-16)/BASE_W,(window.innerHeight-180)/BASE_H,1);
+  scale=s;CW=Math.floor(BASE_W*s);CH=Math.floor(BASE_H*s);
+  canvas.width=CW;canvas.height=CH;
 }
+resize();
+window.addEventListener('resize',()=>{resize();if(state==='idle')draw();});
+const GH=()=>52*scale,PW=()=>52*scale,PG=()=>150*scale,PS=()=>2.8*scale;
+const BS=()=>26*scale,BX=()=>72*scale,GR=()=>0.44*scale,JF=()=>-8.2*scale;
+let state='idle',bY,bV,bR,pipes,score,hi=0,fr=0,lastT=null;
+let clouds=[{x:60,y:45,w:65,sp:0.35},{x:200,y:30,w:48,sp:0.22},{x:310,y:68,w:58,sp:0.28}];
+function init(){bY=CH*0.45;bV=0;bR=0;score=0;fr=0;pipes=[mp(CW+50),mp(CW+230),mp(CW+410)];scEl.textContent=0;}
+function mp(x){const mn=38*scale,mx=CH-GH()-PG()-48*scale;return{x,tH:Math.random()*(mx-mn)+mn,passed:false};}
+function jump(){
+  if(state==='idle'){init();state='playing';bV=JF();lastT=null;requestAnimationFrame(loop);}
+  else if(state==='playing'){bV=JF();}
+  else if(state==='dead'){state='idle';draw();}
+}
+document.addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();jump();}});
+canvas.addEventListener('pointerdown',e=>{e.preventDefault();jump();});
+function loop(ts){
+  if(state!=='playing')return;
+  if(!lastT)lastT=ts;
+  const dt=Math.min((ts-lastT)/16.67,3);lastT=ts;fr++;
+  bV+=GR()*dt;bV=Math.max(Math.min(bV,11*scale),-11*scale);
+  bY+=bV*dt;bR=Math.min(Math.max(bV*4,-25),70);
+  if(bY>=CH-GH()-BS()||bY<=0){die();return;}
+  for(let p of pipes){
+    p.x-=PS()*dt;
+    const m=4*scale;
+    if(BX()+BS()-m>p.x&&BX()+m<p.x+PW()){
+      if(bY+m<p.tH||bY+BS()-m>p.tH+PG()){die();return;}
+    }
+    if(!p.passed&&p.x+PW()<BX()){p.passed=true;score++;scEl.textContent=score;}
+  }
+  pipes=pipes.filter(p=>p.x>-PW()-10);
+  while(pipes.length<3||pipes[pipes.length-1].x<CW+180)
+    pipes.push(mp((pipes[pipes.length-1]?.x||CW)+215*scale));
+  clouds=clouds.map(c=>{let nx=c.x-c.sp*scale;if(nx<-90)nx=CW+40;return{...c,x:nx};});
+  draw();requestAnimationFrame(loop);
+}
+function die(){state='dead';if(score>hi){hi=score;hiEl.textContent=hi;}lastT=null;draw();}
+function draw(){
+  const sky=ctx.createLinearGradient(0,0,0,CH);
+  sky.addColorStop(0,'#5ba3d9');sky.addColorStop(0.65,'#87CEEB');sky.addColorStop(1,'#c8f0c0');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,CW,CH);
+  clouds.forEach(c=>{
+    ctx.fillStyle='rgba(255,255,255,0.8)';ctx.beginPath();
+    ctx.ellipse(c.x,c.y,c.w*.5,c.w*.28,0,0,Math.PI*2);
+    ctx.ellipse(c.x-c.w*.2,c.y+c.w*.06,c.w*.3,c.w*.2,0,0,Math.PI*2);
+    ctx.ellipse(c.x+c.w*.22,c.y+c.w*.06,c.w*.27,c.w*.19,0,0,Math.PI*2);ctx.fill();
+  });
+  pipes.forEach(p=>{
+    const g=ctx.createLinearGradient(p.x,0,p.x+PW(),0);
+    g.addColorStop(0,'#3a7d44');g.addColorStop(0.45,'#52b056');g.addColorStop(1,'#2d6e36');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.roundRect(p.x,0,PW(),p.tH,[0,0,5,5]);ctx.fill();
+    ctx.fillStyle='#4a9e4e';
+    ctx.beginPath();ctx.roundRect(p.x-5*scale,p.tH-16*scale,PW()+10*scale,18*scale,4);ctx.fill();
+    const boty=p.tH+PG();
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.roundRect(p.x,boty,PW(),CH-boty-GH(),[5,5,0,0]);ctx.fill();
+    ctx.fillStyle='#4a9e4e';
+    ctx.beginPath();ctx.roundRect(p.x-5*scale,boty-2*scale,PW()+10*scale,18*scale,4);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.1)';
+    ctx.fillRect(p.x+5*scale,0,7*scale,p.tH);
+    ctx.fillRect(p.x+5*scale,boty,7*scale,CH-boty-GH());
+  });
+  const gr=ctx.createLinearGradient(0,CH-GH(),0,CH);
+  gr.addColorStop(0,'#8BC34A');gr.addColorStop(0.28,'#689F38');
+  gr.addColorStop(0.29,'#795548');gr.addColorStop(1,'#5D4037');
+  ctx.fillStyle=gr;ctx.fillRect(0,CH-GH(),CW,GH());
+  ctx.strokeStyle='#6abf33';ctx.lineWidth=2*scale;
+  ctx.beginPath();ctx.moveTo(0,CH-GH());ctx.lineTo(CW,CH-GH());ctx.stroke();
+  ctx.save();
+  const bx=BX()+BS()/2,by2=bY+BS()/2;
+  ctx.translate(bx,by2);ctx.rotate(bR*Math.PI/180);
+  ctx.font=`${BS()}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor='rgba(0,0,0,0.3)';ctx.shadowBlur=5;
+  ctx.fillText(fr%8<4?'🐦':'🦅',0,0);ctx.restore();
+  if(state==='idle'||state==='dead')overlay();
+}
+function overlay(){
+  ctx.fillStyle='rgba(0,0,0,0.42)';ctx.fillRect(0,0,CW,CH);
+  const dead=state==='dead';
+  const bw=235*scale,bh=(dead?185:148)*scale;
+  const bx=(CW-bw)/2,by=(CH-bh)/2;
+  ctx.fillStyle='rgba(255,255,255,0.96)';
+  ctx.beginPath();ctx.roundRect(bx,by,bw,bh,16*scale);ctx.fill();
+  ctx.textAlign='center';ctx.shadowBlur=0;
+  if(!dead){
+    ctx.font=`${42*scale}px serif`;ctx.fillText('🐦',CW/2,by+46*scale);
+    ctx.fillStyle='#1a1a2e';ctx.font=`bold ${17*scale}px Segoe UI`;ctx.fillText('FLOPPY BIRD',CW/2,by+72*scale);
+    ctx.fillStyle='#666';ctx.font=`${11*scale}px Segoe UI`;ctx.fillText('পাইপের ফাঁক দিয়ে উড়ে যাও!',CW/2,by+90*scale);
+    ctx.fillStyle='#ffd700';ctx.beginPath();ctx.roundRect(bx+28*scale,by+106*scale,bw-56*scale,28*scale,14*scale);ctx.fill();
+    ctx.fillStyle='#1a1a2e';ctx.font=`bold ${12*scale}px Segoe UI`;ctx.fillText('TAP করো শুরু করতে ▶',CW/2,by+124*scale);
+  }else{
+    ctx.font=`${38*scale}px serif`;ctx.fillText('💥',CW/2,by+44*scale);
+    ctx.fillStyle='#e53935';ctx.font=`bold ${19*scale}px Segoe UI`;ctx.fillText('GAME OVER!',CW/2,by+68*scale);
+    ctx.fillStyle='#1a1a2e';ctx.font=`bold ${26*scale}px Segoe UI`;ctx.fillText(`${score} পয়েন্ট`,CW/2,by+100*scale);
+    ctx.fillStyle=score>0&&score>=hi?'#ffa000':'#999';
+    ctx.font=`${11*scale}px Segoe UI`;
+    ctx.fillText(score>0&&score>=hi?'🏆 নতুন রেকর্ড!':`সর্বোচ্চ: ${hi} পয়েন্ট`,CW/2,by+118*scale);
+    ctx.fillStyle='#4CAF50';ctx.beginPath();ctx.roundRect(bx+28*scale,by+132*scale,bw-56*scale,28*scale,14*scale);ctx.fill();
+    ctx.fillStyle='white';ctx.font=`bold ${12*scale}px Segoe UI`;ctx.fillText('আবার খেলো 🔄',CW/2,by+150*scale);
+  }
+}
+init();draw();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+</script>
+</body>
+</html>
