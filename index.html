@@ -1,0 +1,436 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+const GRAVITY = 0.5;
+const JUMP_FORCE = -9;
+const PIPE_WIDTH = 60;
+const PIPE_GAP = 160;
+const PIPE_SPEED = 3;
+const BIRD_X = 80;
+const BIRD_SIZE = 30;
+
+export default function FlappyBird() {
+  const [gameState, setGameState] = useState("idle"); // idle, playing, dead
+  const [birdY, setBirdY] = useState(250);
+  const [birdVel, setBirdVel] = useState(0);
+  const [pipes, setPipes] = useState([]);
+  const [score, setScore] = useState(0);
+  const [highScore, setHighScore] = useState(0);
+  const [birdRot, setBirdRot] = useState(0);
+  const [frame, setFrame] = useState(0);
+
+  const gameRef = useRef(null);
+  const stateRef = useRef(gameState);
+  const birdYRef = useRef(birdY);
+  const birdVelRef = useRef(birdVel);
+  const pipesRef = useRef(pipes);
+  const scoreRef = useRef(score);
+  const animRef = useRef(null);
+  const lastTimeRef = useRef(null);
+
+  const CANVAS_W = 400;
+  const CANVAS_H = 550;
+  const GROUND_H = 60;
+
+  stateRef.current = gameState;
+  birdYRef.current = birdY;
+  birdVelRef.current = birdVel;
+  pipesRef.current = pipes;
+  scoreRef.current = score;
+
+  const generatePipe = (x) => ({
+    x,
+    topH: Math.random() * (CANVAS_H - GROUND_H - PIPE_GAP - 80) + 40,
+    passed: false,
+    id: Math.random(),
+  });
+
+  const resetGame = useCallback(() => {
+    setBirdY(250);
+    setBirdVel(0);
+    setBirdRot(0);
+    setPipes([generatePipe(500), generatePipe(720), generatePipe(940)]);
+    setScore(0);
+    setFrame(0);
+    lastTimeRef.current = null;
+  }, []);
+
+  const jump = useCallback(() => {
+    if (stateRef.current === "idle") {
+      resetGame();
+      setGameState("playing");
+      setBirdVel(JUMP_FORCE);
+    } else if (stateRef.current === "playing") {
+      setBirdVel(JUMP_FORCE);
+    } else if (stateRef.current === "dead") {
+      setGameState("idle");
+    }
+  }, [resetGame]);
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.code === "Space" || e.code === "ArrowUp") {
+        e.preventDefault();
+        jump();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [jump]);
+
+  useEffect(() => {
+    if (gameState !== "playing") {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+      return;
+    }
+
+    const tick = (timestamp) => {
+      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
+      const delta = Math.min((timestamp - lastTimeRef.current) / 16.67, 3);
+      lastTimeRef.current = timestamp;
+
+      setFrame((f) => f + 1);
+
+      setBirdVel((v) => {
+        const newVel = v + GRAVITY * delta;
+        const clamped = Math.max(Math.min(newVel, 12), -12);
+        setBirdRot(Math.min(Math.max(clamped * 5, -25), 70));
+        return clamped;
+      });
+
+      setBirdY((y) => {
+        const newY = y + birdVelRef.current * delta;
+        if (newY >= CANVAS_H - GROUND_H - BIRD_SIZE || newY <= 0) {
+          setHighScore((h) => Math.max(h, scoreRef.current));
+          setGameState("dead");
+          return y;
+        }
+        return newY;
+      });
+
+      setPipes((prev) => {
+        const updated = prev
+          .map((p) => ({ ...p, x: p.x - PIPE_SPEED * delta }))
+          .filter((p) => p.x > -PIPE_WIDTH - 10);
+
+        while (
+          updated.length < 3 ||
+          updated[updated.length - 1].x < CANVAS_W + 200
+        ) {
+          const lastX =
+            updated.length > 0
+              ? updated[updated.length - 1].x
+              : CANVAS_W + 50;
+          updated.push(generatePipe(lastX + 220));
+        }
+
+        let collision = false;
+        updated.forEach((p) => {
+          const bx = BIRD_X;
+          const by = birdYRef.current;
+          const margin = 4;
+
+          if (
+            bx + BIRD_SIZE - margin > p.x &&
+            bx + margin < p.x + PIPE_WIDTH
+          ) {
+            if (by + margin < p.topH || by + BIRD_SIZE - margin > p.topH + PIPE_GAP) {
+              collision = true;
+            }
+          }
+
+          if (!p.passed && p.x + PIPE_WIDTH < BIRD_X) {
+            p.passed = true;
+            setScore((s) => s + 1);
+          }
+        });
+
+        if (collision) {
+          setHighScore((h) => Math.max(h, scoreRef.current));
+          setGameState("dead");
+        }
+
+        return updated;
+      });
+
+      animRef.current = requestAnimationFrame(tick);
+    };
+
+    animRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [gameState]);
+
+  const clouds = useRef([
+    { x: 80, y: 60, w: 70, speed: 0.3 },
+    { x: 250, y: 40, w: 50, speed: 0.2 },
+    { x: 320, y: 80, w: 60, speed: 0.25 },
+  ]);
+
+  useEffect(() => {
+    if (gameState === "playing") {
+      clouds.current = clouds.current.map((c) => {
+        let nx = c.x - c.speed;
+        if (nx < -100) nx = CANVAS_W + 50;
+        return { ...c, x: nx };
+      });
+    }
+  }, [frame, gameState]);
+
+  const wingUp = frame % 8 < 4;
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Segoe UI', sans-serif",
+        userSelect: "none",
+      }}
+    >
+      <div style={{ marginBottom: 16, textAlign: "center" }}>
+        <h1 style={{
+          color: "#ffd700",
+          fontSize: 32,
+          fontWeight: 900,
+          letterSpacing: 3,
+          textShadow: "0 0 20px #ffd70088",
+          margin: 0,
+        }}>
+          🐦 FLOPPY BIRD
+        </h1>
+        <div style={{ color: "#aac4ff", fontSize: 13, marginTop: 4, letterSpacing: 1 }}>
+          SPACE / TAP to fly
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+        <div style={{
+          background: "rgba(255,255,255,0.07)",
+          borderRadius: 12,
+          padding: "6px 20px",
+          color: "#fff",
+          fontSize: 18,
+          fontWeight: 700,
+          border: "1px solid rgba(255,255,255,0.15)",
+        }}>
+          🏆 {highScore}
+        </div>
+        <div style={{
+          background: "rgba(255,215,0,0.15)",
+          borderRadius: 12,
+          padding: "6px 20px",
+          color: "#ffd700",
+          fontSize: 18,
+          fontWeight: 700,
+          border: "1px solid rgba(255,215,0,0.3)",
+        }}>
+          ⭐ {score}
+        </div>
+      </div>
+
+      <div
+        ref={gameRef}
+        onClick={jump}
+        style={{
+          width: CANVAS_W,
+          height: CANVAS_H,
+          position: "relative",
+          overflow: "hidden",
+          borderRadius: 20,
+          cursor: "pointer",
+          boxShadow: "0 0 60px rgba(100,180,255,0.2), 0 20px 60px rgba(0,0,0,0.5)",
+          border: "2px solid rgba(255,255,255,0.1)",
+          background: "linear-gradient(180deg, #87CEEB 0%, #b0e0ff 60%, #c8f0c0 80%, #90EE90 100%)",
+        }}
+      >
+        {/* Sky gradient overlay */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(180deg, #5ba3d9 0%, #87CEEB 30%, #b8dff5 70%, transparent 100%)",
+          pointerEvents: "none",
+        }} />
+
+        {/* Clouds */}
+        {clouds.current.map((c, i) => (
+          <div key={i} style={{
+            position: "absolute",
+            left: c.x, top: c.y,
+            width: c.w, height: c.w * 0.55,
+            background: "rgba(255,255,255,0.85)",
+            borderRadius: "50%",
+            boxShadow: `${c.w * 0.3}px -${c.w * 0.2}px 0 ${c.w * 0.2}px rgba(255,255,255,0.7),
+                        -${c.w * 0.2}px -${c.w * 0.15}px 0 ${c.w * 0.15}px rgba(255,255,255,0.7)`,
+          }} />
+        ))}
+
+        {/* Pipes */}
+        {pipes.map((p) => (
+          <g key={p.id}>
+            {/* Top pipe */}
+            <div style={{
+              position: "absolute",
+              left: p.x, top: 0,
+              width: PIPE_WIDTH, height: p.topH,
+              background: "linear-gradient(90deg, #3a7d44, #52b056, #3a7d44)",
+              borderRadius: "0 0 6px 6px",
+              boxShadow: "inset -4px 0 8px rgba(0,0,0,0.3), 2px 0 8px rgba(0,0,0,0.2)",
+            }}>
+              <div style={{
+                position: "absolute", bottom: -14, left: -6,
+                width: PIPE_WIDTH + 12, height: 20,
+                background: "linear-gradient(90deg, #2d6e36, #4a9e4e, #2d6e36)",
+                borderRadius: 4,
+                boxShadow: "0 3px 8px rgba(0,0,0,0.3)",
+              }} />
+            </div>
+            {/* Bottom pipe */}
+            <div style={{
+              position: "absolute",
+              left: p.x, top: p.topH + PIPE_GAP,
+              width: PIPE_WIDTH,
+              height: CANVAS_H - p.topH - PIPE_GAP - GROUND_H,
+              background: "linear-gradient(90deg, #3a7d44, #52b056, #3a7d44)",
+              borderRadius: "6px 6px 0 0",
+              boxShadow: "inset -4px 0 8px rgba(0,0,0,0.3), 2px 0 8px rgba(0,0,0,0.2)",
+            }}>
+              <div style={{
+                position: "absolute", top: -14, left: -6,
+                width: PIPE_WIDTH + 12, height: 20,
+                background: "linear-gradient(90deg, #2d6e36, #4a9e4e, #2d6e36)",
+                borderRadius: 4,
+                boxShadow: "0 -3px 8px rgba(0,0,0,0.3)",
+              }} />
+            </div>
+          </g>
+        ))}
+
+        {/* Ground */}
+        <div style={{
+          position: "absolute",
+          bottom: 0, left: 0, right: 0,
+          height: GROUND_H,
+          background: "linear-gradient(180deg, #8BC34A 0%, #689F38 40%, #795548 40%, #5D4037 100%)",
+          borderTop: "3px solid #6abf33",
+        }}>
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} style={{
+              position: "absolute",
+              left: `${i * 11 + (frame * 0.5 % 11)}%`,
+              top: 0, width: 8, height: 20,
+              background: "rgba(255,255,255,0.15)",
+              borderRadius: 2,
+            }} />
+          ))}
+        </div>
+
+        {/* Bird */}
+        <div style={{
+          position: "absolute",
+          left: BIRD_X,
+          top: birdY,
+          width: BIRD_SIZE,
+          height: BIRD_SIZE,
+          transform: `rotate(${birdRot}deg)`,
+          transition: "transform 0.05s",
+          fontSize: 28,
+          lineHeight: 1,
+          filter: "drop-shadow(2px 3px 4px rgba(0,0,0,0.3))",
+        }}>
+          {wingUp ? "🐦" : "🦅"}
+        </div>
+
+        {/* Idle Screen */}
+        {gameState === "idle" && (
+          <div style={{
+            position: "absolute", inset: 0,
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.35)",
+            backdropFilter: "blur(2px)",
+          }}>
+            <div style={{
+              background: "rgba(255,255,255,0.95)",
+              borderRadius: 20,
+              padding: "28px 40px",
+              textAlign: "center",
+              boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+            }}>
+              <div style={{ fontSize: 48 }}>🐦</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "#1a1a2e", marginTop: 8 }}>
+                FLOPPY BIRD
+              </div>
+              <div style={{ fontSize: 13, color: "#666", margin: "8px 0 16px" }}>
+                পাইপের ফাঁক দিয়ে উড়ে যাও!
+              </div>
+              <div style={{
+                background: "#ffd700",
+                color: "#1a1a2e",
+                padding: "10px 28px",
+                borderRadius: 30,
+                fontWeight: 800,
+                fontSize: 15,
+                boxShadow: "0 4px 15px rgba(255,215,0,0.4)",
+              }}>
+                SPACE / TAP করো শুরু করতে
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dead Screen */}
+        {gameState === "dead" && (
+          <div style={{
+            position: "absolute", inset: 0,
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(3px)",
+          }}>
+            <div style={{
+              background: "rgba(255,255,255,0.95)",
+              borderRadius: 20,
+              padding: "28px 40px",
+              textAlign: "center",
+              boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+              animation: "popIn 0.3s ease",
+            }}>
+              <div style={{ fontSize: 44 }}>💥</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "#e53935", marginTop: 6 }}>
+                GAME OVER!
+              </div>
+              <div style={{ fontSize: 32, fontWeight: 900, color: "#1a1a2e", margin: "8px 0" }}>
+                {score} <span style={{ fontSize: 16, color: "#888" }}>পয়েন্ট</span>
+              </div>
+              {score >= highScore && score > 0 && (
+                <div style={{ color: "#ffa000", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+                  🏆 নতুন রেকর্ড!
+                </div>
+              )}
+              <div style={{ fontSize: 13, color: "#888", marginBottom: 16 }}>
+                সর্বোচ্চ: {highScore} পয়েন্ট
+              </div>
+              <div style={{
+                background: "#4CAF50",
+                color: "white",
+                padding: "10px 28px",
+                borderRadius: 30,
+                fontWeight: 800,
+                fontSize: 15,
+                boxShadow: "0 4px 15px rgba(76,175,80,0.4)",
+              }}>
+                TAP করো আবার খেলতে
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 14, letterSpacing: 1 }}>
+        SPACE · ARROW UP · CLICK/TAP
+      </div>
+    </div>
+  );
+}
